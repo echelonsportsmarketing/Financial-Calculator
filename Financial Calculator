@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ESM Dashboard & Invoice Generator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.6.1/jspdf.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Roboto&display=swap');
+
+body {
+    margin:0;
+    font-family:'Roboto',sans-serif;
+    background: linear-gradient(135deg,#0d1b2a,#1b263b);
+    color:white;
+    min-height:100vh;
+}
+
+.container {
+    max-width:1200px;
+    margin:30px auto;
+    padding:30px;
+    background-color:rgba(28,36,50,0.95);
+    border-radius:15px;
+}
+
+h2 {
+    text-align:center;
+    margin-bottom:20px;
+    color:white;
+    letter-spacing:1px;
+}
+
+.tab-bar {
+    display:flex;
+    gap:10px;
+    margin-bottom:20px;
+}
+
+.tab {
+    padding:8px 15px;
+    border-radius:8px;
+    background-color:#2c3e50;
+    cursor:pointer;
+    user-select:none;
+}
+.tab.active { background-color:#0d1b2a; font-weight:bold; }
+
+button { 
+    padding:12px; margin-top:10px;
+    border:none; border-radius:8px;
+    background-color:#0d1b2a; color:white;
+    cursor:pointer; transition:0.3s; 
+}
+button:hover { background-color:#2c3e50; }
+
+input, select {
+    padding:8px;
+    border:none;
+    border-radius:6px;
+    width:100%;
+    margin-top:5px;
+    background-color:#2c3e50;
+    color:white;
+}
+
+.table-container { overflow-x:auto; margin-top:20px; }
+table { width:100%; border-collapse:collapse; }
+th,td { padding:12px; text-align:center; }
+th { background-color:#0d1b2a; }
+td { background-color:#2c3e50; }
+tfoot td { font-weight:bold; background-color:#0d1b2a; }
+
+.remove-btn { padding:5px 8px; background:#2c3e50; color:white; border:none; border-radius:5px; cursor:pointer; }
+.remove-btn:hover { background:#0d1b2a; }
+</style>
+</head>
+<body>
+
+<div class="container">
+<h2>ESM Dashboard & Invoice Generator</h2>
+
+<div class="tab-bar" id="tabBar"></div>
+<button onclick="addTab()">+ New Deal</button>
+
+<label>Select Package</label>
+<select id="packageSelect">
+    <option value="custom">Custom Package</option>
+    <option value="intro">Introductory Activation Package</option>
+    <option value="community">Community Spotlight Package</option>
+    <option value="local">Local Ambassador Package</option>
+    <option value="team">Team Activation Package</option>
+</select>
+
+<div id="customInputs">
+    <label>Package Type</label>
+    <input type="text" id="packageType" placeholder="Enter package name">
+    <label>Base Dollar Amount ($)</label>
+    <input type="number" id="baseAmount" placeholder="Ex: 5000">
+    <label>ESM Percentage (%)</label>
+    <input type="number" id="esmPercent" placeholder="Ex: 20">
+    <label>Player Percentage (%)</label>
+    <input type="number" id="playerPercent" placeholder="Ex: 80">
+    <label>Transaction Fee (%)</label>
+    <input type="number" id="transactionFee" placeholder="Ex: 2.9">
+</div>
+
+<button onclick="addPackage()">Add Package</button>
+<button onclick="downloadCSV()">Download CSV Report</button>
+<button onclick="generatePDF()">Generate PDF Report</button>
+<button onclick="generateInvoice()">Download Bluevine Invoice</button>
+
+<div class="table-container">
+    <table id="packageTable">
+        <thead>
+            <tr>
+                <th>Package</th>
+                <th>Base Amount</th>
+                <th>Fees Lost</th>
+                <th>ESM Receives</th>
+                <th>Player Receives</th>
+                <th>Remove</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+        <tfoot>
+            <tr>
+                <td>Total</td>
+                <td id="totalBase">$0.00</td>
+                <td id="totalFees">$0.00</td>
+                <td id="totalESM">$0.00</td>
+                <td id="totalPlayer">$0.00</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+</div>
+
+</div>
+
+<script>
+const presetPackages = {
+    intro:{packageType:"Introductory Activation Package", baseAmount:225, esmPercent:20, playerPercent:80, transactionFee:2.9},
+    community:{packageType:"Community Spotlight Package", baseAmount:350, esmPercent:20, playerPercent:80, transactionFee:2.9},
+    local:{packageType:"Local Ambassador Package", baseAmount:925, esmPercent:20, playerPercent:80, transactionFee:2.9},
+    team:{packageType:"Team Activation Package", baseAmount:2400, esmPercent:20, playerPercent:80, transactionFee:2.9}
+};
+
+// Multi-tab setup
+let tabs=[{name:"Deal 1", packages:[]}];
+let activeTab=0;
+updateTabs();
+function addTab(){ 
+    const newName="Deal "+(tabs.length+1);
+    tabs.push({name:newName, packages:[]}); 
+    activeTab=tabs.length-1;
+    updateTabs(); updateTable(); 
+}
+function switchTab(index){ activeTab=index; updateTabs(); updateTable(); }
+function updateTabs(){
+    const tabBar=document.getElementById("tabBar");
+    tabBar.innerHTML="";
+    tabs.forEach((tab,i)=>{
+        const div=document.createElement("div");
+        div.className="tab"+(i===activeTab?" active":"");
+        div.textContent=tab.name;
+        div.onclick=()=>switchTab(i);
+        tabBar.appendChild(div);
+    });
+}
+
+document.getElementById('packageSelect').addEventListener('change', function(){
+    const val=this.value;
+    const inputs=document.getElementById('customInputs');
+    if(val==="custom"){
+        inputs.style.display="block";
+        document.getElementById('packageType').value="";
+        document.getElementById('baseAmount').value="";
+        document.getElementById('esmPercent').value="";
+        document.getElementById('playerPercent').value="";
+        document.getElementById('transactionFee').value="";
+    }else{
+        inputs.style.display="block";
+        const pkg=presetPackages[val];
+        document.getElementById('packageType').value=pkg.packageType;
+        document.getElementById('baseAmount').value=pkg.baseAmount;
+        document.getElementById('esmPercent').value=pkg.esmPercent;
+        document.getElementById('playerPercent').value=pkg.playerPercent;
+        document.getElementById('transactionFee').value=pkg.transactionFee;
+    }
+});
+
+function addPackage(){
+    const packageType=document.getElementById("packageType").value||"Custom";
+    const baseAmount=parseFloat(document.getElementById("baseAmount").value)||0;
+    const esmPercent=(parseFloat(document.getElementById("esmPercent").value)||0)/100;
+    const playerPercent=(parseFloat(document.getElementById("playerPercent").value)||0)/100;
+    const transactionFee=(parseFloat(document.getElementById("transactionFee").value)||0)/100;
+
+    const feesLost=baseAmount*transactionFee;
+    const netAfterFees=baseAmount-feesLost;
+    const esmReceives=netAfterFees*esmPercent;
+    const playerReceives=netAfterFees*playerPercent;
+
+    tabs[activeTab].packages.push({packageType, baseAmount, feesLost, esmReceives, playerReceives});
+    updateTable();
+}
+
+function removePackage(index){
+    tabs[activeTab].packages.splice(index,1);
+    updateTable();
+}
+
+function updateTable(){
+    const tbody=document.querySelector("#packageTable tbody");
+    tbody.innerHTML="";
+    let totalBase=0,totalFees=0,totalESM=0,totalPlayer=0;
+    tabs[activeTab].packages.forEach((pkg,i)=>{
+        const row=document.createElement("tr");
+        row.innerHTML=`<td>${pkg.packageType}</td>
+        <td>$${pkg.baseAmount.toFixed(2)}</td>
+        <td>$${pkg.feesLost.toFixed(2)}</td>
+        <td>$${pkg.esmReceives.toFixed(2)}</td>
+        <td>$${pkg.playerReceives.toFixed(2)}</td>
+        <td><button class="remove-btn" onclick="removePackage(${i})">Remove</button></td>`;
+        tbody.appendChild(row);
+
+        totalBase+=pkg.baseAmount;
+        totalFees+=pkg.feesLost;
+        totalESM+=pkg.esmReceives;
+        totalPlayer+=pkg.playerReceives;
+    });
+    document.getElementById("totalBase").innerText="$"+totalBase.toFixed(2);
+    document.getElementById("totalFees").innerText="$"+totalFees.toFixed(2);
+    document.getElementById("totalESM").innerText="$"+totalESM.toFixed(2);
+    document.getElementById("totalPlayer").innerText="$"+totalPlayer.toFixed(2);
+}
+
+// CSV download
+function downloadCSV(){
+    let csv="Package,Base Amount,Fees Lost,ESM Receives,Player Receives\n";
+    tabs[activeTab].packages.forEach(pkg=>{
+        csv+=`${pkg.packageType},${pkg.baseAmount.toFixed(2)},${pkg.feesLost.toFixed(2)},${pkg.esmReceives.toFixed(2)},${pkg.playerReceives.toFixed(2)}\n`;
+    });
+    const blob=new Blob([csv],{type:'text/csv'});
+    const url=window.URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=`ESM_Financial_Report_${tabs[activeTab].name}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+}
+
+// PDF report
+function generatePDF(){
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFont("Roboto");
+    doc.setFontSize(22);
+    doc.setTextColor("#ffffff");
+    doc.text(`ESM Financial Report - ${tabs[activeTab].name}`, 15, 20);
+
+    // ESM logo placeholder (replace with local file if needed)
+    const img = new Image();
+    img.src = "assets/esm-logo.png";
+    img.onload = function() {
+        doc.addImage(img,'PNG',160,10,35,35);
+        addTablePDF(doc);
+        doc.save(`ESM_Report_${tabs[activeTab].name}.pdf`);
+    }
+}
+
+function addTablePDF(doc){
+    let startY=50;
+    tabs[activeTab].packages.forEach(pkg=>{
+        doc.setDrawColor(255);
+        doc.rect(15,startY-5,180,10);
+        doc.setFontSize(12);
+        doc.setTextColor("#ffffff");
+        doc.text(`${pkg.packageType}: $${pkg.baseAmount.toFixed(2)} | Fees: $${pkg.feesLost.toFixed(2)} | ESM: $${pkg.esmReceives.toFixed(2)} | Player: $${pkg.playerReceives.toFixed(2)}`,17,startY);
+        startY+=12;
+    });
+    const totals={
+        base: tabs[activeTab].packages.reduce((a,b)=>a+b.baseAmount,0),
+        fees: tabs[activeTab].packages.reduce((a,b)=>a+b.feesLost,0),
+        esm: tabs[activeTab].packages.reduce((a,b)=>a+b.esmReceives,0),
+        player: tabs[activeTab].packages.reduce((a,b)=>a+b.playerReceives,0)
+    };
+    doc.setTextColor("#ffffff");
+    doc.text(`TOTALS → Base: $${totals.base.toFixed(2)}, Fees: $${totals.fees.toFixed(2)}, ESM: $${totals.esm.toFixed(2)}, Player: $${totals.player.toFixed(2)}`,15,startY+5);
+}
+
+// Bluevine invoice PDF
+function generateInvoice(){
+    if(tabs[activeTab].packages.length===0){ alert("Add at least one package to generate invoice."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFont("Roboto");
+    doc.setFontSize(22);
+    doc.setTextColor("#ffffff");
+    doc.text(`ESM Invoice - ${tabs[activeTab].name}`, 15, 20);
+
+    doc.setFontSize(12);
+    let startY=40;
+    doc.setTextColor("#ffffff");
+    doc.text("To: [Company Name]",15,startY); startY+=6;
+    doc.text("Invoice Date: "+new Date().toLocaleDateString(),15,startY); startY+=10;
+    doc.text("Packages:",15,startY); startY+=6;
+    tabs[activeTab].packages.forEach(pkg=>{
+        doc.text(`- ${pkg.packageType}: $${pkg.baseAmount.toFixed(2)}`,17,startY);
+        startY+=6;
+    });
+    const total=tabs[activeTab].packages.reduce((a,b)=>a+b.baseAmount,0);
+    startY+=5;
+    doc.text(`TOTAL DUE: $${total.toFixed(2)}`,15,startY); startY+=6;
+    doc.text("Payment Instructions: Send via Bluevine using the Total Due amount.",15,startY); startY+=6;
+    doc.text("Thank you for partnering with ESM.",15,startY);
+    doc.save(`ESM_Invoice_${tabs[activeTab].name}.pdf`);
+}
+</script>
+
+</body>
+</html>
